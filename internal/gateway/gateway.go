@@ -2691,13 +2691,13 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, from provider.Pro
 		if hw.passing {
 			clientResponseID = call.Usage.ResponseID
 		}
-		if !hw.passing && modelRetired(hw.code(), hw.errBody()) {
+		if !hw.heldLimit && !hw.passing && modelRetired(hw.code(), hw.errBody()) {
 			// the vendor's list may still name it (OpenCode Zen's
 			// exo-free): it leaves the lists of this provider's models
 			provider.Retire(c.p.ID, c.model)
 		}
 		outgrew := false // a failure that didn't say so was the request's length
-		if !hw.passing && !hw.refused && hw.code() >= 400 {
+		if !hw.heldLimit && !hw.passing && !hw.refused && hw.code() >= 400 {
 			if req, err := parse(from, attemptBody); err == nil {
 				if msg, ok := tooLongUnsaid(c.p, c.model, estimate(req), hw.code(), hw.errBody()); ok {
 					// told as an overflow: not asked again, of this one or
@@ -2761,12 +2761,29 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request, from provider.Pro
 			sentMs = min(max(time.Unix(0, at).Sub(start).Milliseconds(), 1), call.TTFT)
 			ownMs, retriedMs, queuedMs = splitSent(sentMs, start, firstBegan, began, asked.Load(), queued)
 		}
-		if r.Context().Err() != nil && !hw.ended {
+		if r.Context().Err() != nil && (!hw.ended || hw.heldLimit || hw.searchHeld && !hw.passing) {
 			// the agent went away: nobody failed, and nobody else is asked
 			call.Status, call.Error = canceled(r.Context())
 			try.Status, try.Error, try.Fail = call.Status, call.Error, failCanceled
 			watched.attempt(call, try, c.p.ID, sent, hw, capture)
 			s.trace.update(tr, func(t *Route) { t.Tries[len(t.Tries)-1] = try })
+			break
+		}
+		if hw.heldLimit {
+			// This is magpie's hold limit, not a vendor failure or the
+			// agent canceling. Never rest or replan this candidate, and
+			// never release its abandoned search when nobody is left.
+			try.Fail = failHeldLimit
+			watched.attempt(call, try, c.p.ID, sent, hw, capture)
+			s.trace.update(tr, func(t *Route) { t.Tries[len(t.Tries)-1] = try })
+			if other == nil {
+				other = &Try{Status: call.Status, Error: call.Error}
+			}
+			skipped = append(skipped, c.label()+": "+call.Error)
+			if !last && !kept.tooQuiet(0) {
+				continue
+			}
+			failTo(w, kept, from, call.Status, call.Error)
 			break
 		}
 		if hw.slow {

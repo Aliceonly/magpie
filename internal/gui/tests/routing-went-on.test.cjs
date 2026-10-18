@@ -59,9 +59,31 @@ const routes = [{
   ],
   done: true, status: 503, error: "Grok: upstream busy", ms: 500,
 }];
+const heldCases = [
+  { reason: "buffer", status: 502, next: true },
+  { reason: "time", status: 504, next: false },
+  { reason: "request-idle", status: 504, next: false },
+];
+routes.push(...heldCases.map((c, i) => {
+  const error = `magpie: local limit for holding search output (${c.reason})`;
+  return {
+    id: 100 - i, seq: 100 - i, time: at(4 + i), agent: "codex", model: "group/search", provider: c.next ? "xai" : "codex",
+    // An unasked member in the order is no evidence of fallback.
+    order: [codex, grok],
+    tries: [
+      { id: codex.id, model: codex.model, start: at(4 + i), done: true, status: c.status, ms: 900, fail: "held_limit", error },
+      ...(c.next ? [{ id: grok.id, model: grok.model, start: at(4 + i), done: true, status: 200, ms: 1000 }] : []),
+    ],
+    done: true, status: c.next ? 200 : c.status, ms: c.next ? 1900 : 900,
+    ...(c.next ? { fallback: error } : { error }),
+  };
+}));
 
-function serve(lang) {
-  const state = { agents: [{ id: "claude", name: "Claude Code", path: "/test/settings.json", fields: [] }], profiles: [], settings: { lang, theme: "light" } };
+function serve(lang, live) {
+  const state = { agents: [
+    { id: "claude", name: "Claude Code", path: "/test/settings.json", fields: [] },
+    { id: "codex", name: "Codex", path: "/test/config.toml", fields: [] },
+  ], profiles: [], settings: { lang, theme: "light" } };
   return async (route) => {
     const url = new URL(route.request().url());
     const json = (data) => route.fulfill({ json: data });
@@ -70,8 +92,8 @@ function serve(lang) {
     if (url.pathname === "/api/state") return json(state);
     if (url.pathname === "/api/plugins") return json({ plugins: [] });
     if (url.pathname === "/api/gateway/trace") {
-      if (url.searchParams.get("wait")) await new Promise((r) => setTimeout(r, 20e3));
-      return json({ mine: true, now: now.toISOString(), seq: 1, totals: { requests: 0, rerouted: 0, errors: 0 }, routes: [] });
+      if (Number(url.searchParams.get("after")) >= live.seq) await new Promise((r) => { live.wake = r; });
+      return json({ mine: true, now: new Date().toISOString(), seq: live.seq, totals: { requests: 0, rerouted: 0, errors: 0 }, routes: live.routes });
     }
     if (url.pathname === "/api/gateway/history") {
       const d = url.searchParams.get("day");
@@ -91,15 +113,25 @@ function serve(lang) {
 // the next; earlier: the agent got the earlier error
 const want = {
   en: { went: "and the request goes on to b@example.com before any of the reply reaches Claude Code", gets: ["wouldn't fix", "so Claude Code gets"], passed: "passed to", row: "went on to the next",
-    left: "nobody is left to try, so Claude Code gets the error", on: "goes on to", earlier: "Claude Code gets the error an earlier try gave" },
+    left: "nobody is left to try, so Claude Code gets the error", on: "goes on to", earlier: "Claude Code gets the error an earlier try gave",
+    held: ["magpie canceled", "local limit for holding search output", "No search output reached Codex", "doesn't rest for this"],
+    heldNext: "The request went to Grok", heldError: "Codex gets the error", heldPending: "The request is still in progress", heldLabel: "local search hold limit", success: "answered in", answered: "answered " },
   zh: { went: "请求在回复到达 Claude Code 前转给 b@example.com", gets: ["换账号也无法解决", "Claude Code 收到此错误"], passed: "已交给", row: "已转给下一个",
-    left: "且无其他可试，Claude Code 收到此错误", on: "转给", earlier: "Claude Code 收到的是此前某次尝试的错误" },
+    left: "且无其他可试，Claude Code 收到此错误", on: "转给", earlier: "Claude Code 收到的是此前某次尝试的错误",
+    held: ["magpie", "本地搜索暂存上限", "取消了 c@example.com", "搜索内容未交付给 Codex", "不因此休息"],
+    heldNext: "请求已转给 Grok", heldError: "Codex 收到此错误", heldPending: "请求仍在进行中", heldLabel: "本地搜索暂存上限", success: "完成回答", answered: "返回 " },
   "zh-TW": { went: "請求在回覆到達 Claude Code 前轉給 b@example.com", gets: ["換帳號也無法解決", "Claude Code 收到此錯誤"], passed: "已交給", row: "已轉給下一個",
-    left: "且無其他可試，Claude Code 收到此錯誤", on: "轉給", earlier: "Claude Code 收到的是先前某次嘗試的錯誤" },
+    left: "且無其他可試，Claude Code 收到此錯誤", on: "轉給", earlier: "Claude Code 收到的是先前某次嘗試的錯誤",
+    held: ["magpie", "本機搜尋暫存上限", "取消了 c@example.com", "搜尋內容未交付給 Codex", "不因此休息"],
+    heldNext: "請求已轉給 Grok", heldError: "Codex 收到此錯誤", heldPending: "請求仍在進行中", heldLabel: "本機搜尋暫存上限", success: "完成回答", answered: "返回 " },
   ja: { went: "リクエストは b@example.com に回ります", gets: ["別のアカウントでも解決しない", "Claude Code に届きます"], passed: "渡しました", row: "次に回しました",
-    left: "他に試せる相手がいないため、Claude Code にエラーが届きます", on: "に回ります", earlier: "それより前の試行のエラー" },
+    left: "他に試せる相手がいないため、Claude Code にエラーが届きます", on: "に回ります", earlier: "それより前の試行のエラー",
+    held: ["magpie", "検索出力を保持するローカル上限", "試行を中止しました", "検索出力は Codex に届いていません", "これで休止しません"],
+    heldNext: "リクエストは Grok に引き継がれました", heldError: "Codex にこのエラーが返ります", heldPending: "リクエストはまだ進行中です", heldLabel: "検索出力の保持上限（ローカル）", success: "で応答しました", answered: "が " },
   de: { went: "die Anfrage geht an b@example.com, bevor etwas von der Antwort Claude Code erreicht", gets: ["nicht beheben würde", "daher erhält Claude Code ihn"], passed: "übergeben", row: "an den nächsten weitergegeben",
-    left: "es bleibt niemand zum Versuchen, daher erhält Claude Code den Fehler", on: "geht an", earlier: "Claude Code erhält den Fehler eines früheren Versuchs" },
+    left: "es bleibt niemand zum Versuchen, daher erhält Claude Code den Fehler", on: "geht an", earlier: "Claude Code erhält den Fehler eines früheren Versuchs",
+    held: ["magpie hat den Versuch", "lokalen Limit für das Zurückhalten von Suchausgaben", "abgebrochen", "Keine Suchausgabe hat Codex erreicht", "pausiert deshalb nicht"],
+    heldNext: "Die Anfrage ging an Grok", heldError: "Codex erhält den Fehler", heldPending: "Die Anfrage läuft noch", heldLabel: "lokales Limit für zurückgehaltene Suchausgabe", success: "antwortete in", answered: "antwortete mit " },
 };
 
 for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium", "webkit"])) {
@@ -112,7 +144,14 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         page.setDefaultTimeout(5000);
         const errors = [];
         page.on("pageerror", (e) => errors.push(e.message));
-        await page.route("**/*", serve(lang));
+        const live = { seq: 1, routes: [], wake: null };
+        const publish = (r) => {
+          live.routes = [r];
+          live.seq++;
+          live.wake?.();
+          live.wake = null;
+        };
+        await page.route("**/*", serve(lang, live));
         t.after(async () => {
           if (process.env.ARTIFACT_DIR) {
             await fs.mkdir(process.env.ARTIFACT_DIR, { recursive: true });
@@ -160,6 +199,49 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         const c = steps.find((s) => s.includes("c@example.com (") && s.includes("429"));
         assert(c, JSON.stringify(steps));
         assert(c.includes(w.earlier), c);
+
+        for (const [i, held] of heldCases.entries()) {
+          steps = await stepsOf(4 + i);
+          const local = steps.find((s) => s.includes("c@example.com (") && s.includes(String(held.status)));
+          assert(local, JSON.stringify(steps));
+          for (const text of w.held) assert(local.includes(text), local);
+          assert(local.includes(held.next ? w.heldNext : w.heldError), local);
+          assert(!local.includes(held.next ? w.heldError : w.heldNext), local);
+          assert(!local.includes(w.answered + held.status) && !local.includes(w.gets[0]), local);
+          const row = page.locator(".rt-accts li").filter({ hasText: "c@example.com" }).first();
+          const summary = await row.locator("em").first().textContent();
+          assert(summary.includes(w.heldLabel) && summary.includes(String(held.status)), summary);
+          assert(summary.includes(held.next ? w.row : w.passed), summary);
+        }
+
+        await page.locator(".rt-days .rt-day").first().click();
+        // A completed try is not a completed request. Exercise both later
+        // outcomes through the same live trace updates the page consumes.
+        for (const next of [true, false]) {
+          const pending = { ...routes[4], id: next ? 201 : 202, time: new Date().toISOString(),
+            done: false, status: 0, tries: [routes[4].tries[0]] };
+          publish(pending);
+          const local = page.locator(".rt-steps li").filter({ hasText: "c@example.com (" }).filter({ hasText: "502" });
+          await local.waitFor();
+          if (next) assert(!(await local.textContent()).includes(w.heldError), "an unfinished request must not say the client gets the error");
+          await local.filter({ hasText: w.heldPending }).waitFor();
+          let said = await local.textContent();
+          for (const text of w.held) assert(said.includes(text), said);
+          assert(!said.includes(w.heldError) && !said.includes(w.heldNext), said);
+          const summary = await page.locator(".rt-accts li").filter({ hasText: "c@example.com" }).first().locator("em").first().textContent();
+          assert(!summary.includes(w.passed) && !summary.includes(w.row), summary);
+
+          publish(next
+            ? { ...pending, tries: [...pending.tries, { ...routes[4].tries[1], done: false, status: 0 }] }
+            : { ...pending, done: true, status: 502, error: pending.tries[0].error });
+          await local.filter({ hasText: next ? w.heldNext : w.heldError }).waitFor();
+          said = await local.textContent();
+          assert(!said.includes(w.heldPending) && !said.includes(next ? w.heldError : w.heldNext), said);
+          if (next) {
+            publish({ ...pending, done: true, status: 200, tries: routes[4].tries });
+            await page.locator(".rt-steps li").filter({ hasText: "Grok (" }).filter({ hasText: w.success }).waitFor();
+          }
+        }
 
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
         assert.deepEqual(errors, []);

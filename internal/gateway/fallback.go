@@ -1570,6 +1570,13 @@ type holdWriter struct {
 	// thinkingShown: the model's vendor never refuses after reasoning
 	// (refusesAfterThinking), so its reasoning goes through as it comes
 	thinkingShown bool
+	// searchHeld: a Responses reply has only searched, with none of it
+	// committed yet. Hosted search doesn't execute a client tool, so a
+	// failure after it can still go to another candidate.
+	searchHeld bool
+	// heldLimit: magpie canceled this held search at its existing hold
+	// limit, rather than releasing a reply that may still fail.
+	heldLimit bool
 
 	ended bool   // the stream's last event was written: the reply is whole
 	tail  []byte // the end of the last write, for a marker split across two
@@ -1654,6 +1661,8 @@ func (h *holdWriter) onLoop(f func(loopTrip) bool) {
 // longer than its group waits for a first token.
 var errSlowStart = errors.New("let go: no first token in time")
 
+var errHeldLimit = errors.New("let go: held web search limit reached")
+
 // errLooped is what a try's writes get once its reply was ended for
 // looping (cutLoop).
 var errLooped = errors.New("ended: the reply was stuck in a loop")
@@ -1731,6 +1740,12 @@ func (h *holdWriter) Write(b []byte) (int, error) {
 	if h.slow {
 		return 0, errSlowStart
 	}
+	if h.heldLimit {
+		return 0, errHeldLimit
+	}
+	if h.searchHeld && !h.passing && h.ctx != nil && h.ctx.Err() != nil {
+		return 0, h.ctx.Err()
+	}
 	if h.looped != "" || h.relooped {
 		return 0, errLooped
 	}
@@ -1778,6 +1793,9 @@ func (h *holdWriter) Write(b []byte) (int, error) {
 	n, err := h.held.Write(b)
 	if h.stream && h.failure == 0 {
 		h.scan()
+	}
+	if h.heldLimit {
+		return n, errHeldLimit
 	}
 	return n, err
 }
@@ -1968,6 +1986,9 @@ func refusesAfterThinking(model string) bool {
 // scan reads the held stream's events so far: an error before any content
 // fails it; content, or waiting too long for it, lets it through.
 func (h *holdWriter) scan() {
+	if h.limitSearchHold(h.scanned) {
+		return
+	}
 	for {
 		rest := h.held.Bytes()[h.scanned:]
 		end := eventEnd(rest)
@@ -1975,19 +1996,23 @@ func (h *holdWriter) scan() {
 			break
 		}
 		h.scanned += end
+		if h.searchHeld && h.scanned > holdMost && h.limitSearchHold(h.scanned) {
+			return
+		}
 		switch kind, status, msg := streamEvent(rest[:end]); kind {
 		case eventLead:
-			continue
 		case eventBuffering:
 			h.buffered = true
-			continue
+		case eventSearch:
+			if !h.wantWhole {
+				h.searchHeld = true
+			}
 		case eventThinking:
 			if h.thinkingShown && !h.wantWhole {
 				h.flow()
 				return
 			}
 			h.thinking = true
-			continue
 		case eventError, eventRefusalError:
 			h.failure, h.failMsg = status, msg
 			h.refused = kind == eventRefusalError
@@ -2000,18 +2025,27 @@ func (h *holdWriter) scan() {
 			// protocol's terminator after it; an error above cannot.
 			h.failure, h.failMsg, h.refused = status, msg, true
 			return
-		}
-		if h.wantWhole {
-			if why, ok := endedIncomplete(rest[:end]); ok {
-				h.failure, h.failMsg = http.StatusBadGateway, why
-				return
+		default:
+			if h.wantWhole {
+				if why, ok := endedIncomplete(rest[:end]); ok {
+					h.failure, h.failMsg = http.StatusBadGateway, why
+					return
+				}
+				continue // content, held with the rest (whole)
 			}
-			continue // content, held with the rest (whole)
+			h.flow()
+			return
 		}
-		h.flow()
-		return
+		// Check the held prefix, not later content in the same write.
+		// Splitting writes must not change whether that content passes.
+		if h.limitSearchHold(h.scanned) {
+			return
+		}
 	}
 	if h.wantWhole {
+		return
+	}
+	if h.limitSearchHold(h.held.Len()) {
 		return
 	}
 	if h.alive.tooQuiet(0) {
@@ -2027,7 +2061,7 @@ func (h *holdWriter) scan() {
 	if h.thinking {
 		longest = max(longest, holdThinking)
 	}
-	if h.keptQuiet() {
+	if h.keptQuiet() || h.searchHeld {
 		// a stream of nothing but its frames — response.created, pings,
 		// an empty message begun — while its agent is kept alive with
 		// comments: let through at 15s, the 200 the agent then had made
@@ -2037,7 +2071,7 @@ func (h *holdWriter) scan() {
 	}
 	// a group that asks the next member when one is slow to start holds
 	// the stream until then, for nothing of it to have reached the agent
-	waiting := h.firstWait > 0 && h.first.first == 0
+	waiting := h.firstWait > 0 && h.first.first == 0 && !h.searchHeld
 	if waiting {
 		longest = max(longest, h.firstWait+time.Second)
 	}
@@ -2045,9 +2079,34 @@ func (h *holdWriter) scan() {
 		h.flow()
 		return
 	}
-	if (h.thinking || h.buffered || waiting || h.keptQuiet()) && (time.Since(h.since) >= keepHeldAfter || h.alive != nil && h.alive.sent) {
+	if (h.thinking || h.buffered || waiting || h.keptQuiet() || h.searchHeld) && (time.Since(h.since) >= keepHeldAfter || h.alive != nil && h.alive.sent) {
 		h.keepAlive()
 	}
+}
+
+// limitSearchHold bounds the new search-only hold without committing it.
+// Other held replies keep their existing release policies. The caller
+// holds mu; the agent's cancellation takes precedence over this local one.
+func (h *holdWriter) limitSearchHold(size int) bool {
+	if !h.searchHeld || h.passing || h.wantWhole || h.failure != 0 || h.ctx != nil && h.ctx.Err() != nil {
+		return false
+	}
+	status, why := http.StatusGatewayTimeout, ""
+	switch {
+	case h.alive.tooQuiet(0):
+		why = "request idle"
+	case size > holdMost:
+		status, why = http.StatusBadGateway, "buffer size"
+	case time.Since(h.since) > holdLead:
+		why = "wait time"
+	default:
+		return false
+	}
+	h.failure, h.failMsg, h.heldLimit = status, "magpie's held web search reached its "+why+" limit", true
+	if h.stop != nil {
+		h.stop()
+	}
+	return true
 }
 
 // keepHeldAfter is how long a stream held for its reasoning waits before
@@ -2207,6 +2266,9 @@ var refusalSays = [][]byte{
 
 // flow lets a held stream through, and what follows it.
 func (h *holdWriter) flow() {
+	if h.searchHeld && !h.passing && h.ctx != nil && h.ctx.Err() != nil {
+		return
+	}
 	h.pass()
 	h.sent(h.held.Bytes())
 	h.w.Write(h.held.Bytes())
@@ -2321,7 +2383,7 @@ func refusalAsksAgain(n int) bool {
 
 // release sends a held reply after all: nobody else is left to try.
 func (h *holdWriter) release() {
-	if h.passing || h.status == 0 {
+	if h.passing || h.status == 0 || h.heldLimit {
 		return
 	}
 	if h.alive != nil && h.alive.sent && !h.stream {
@@ -2478,7 +2540,13 @@ func (h *holdWriter) watch() func() {
 // comments only (keepAlive), none of the try, which another account may
 // still answer instead; passed, a comment goes between two lines of it.
 func (h *holdWriter) keepQuiet() {
-	if h.slow || h.relooped || h.ended || h.alive == nil || h.alive.proto == provider.Gemini || h.ctx != nil && h.ctx.Err() != nil {
+	if h.slow || h.relooped || h.alive == nil || h.alive.proto == provider.Gemini || h.ctx != nil && h.ctx.Err() != nil {
+		return
+	}
+	if h.limitSearchHold(h.held.Len()) {
+		return
+	}
+	if h.ended {
 		return
 	}
 	if !h.heard.IsZero() && time.Since(h.heard) >= keepaliveLongest {
@@ -2514,7 +2582,7 @@ func (h *holdWriter) keepQuiet() {
 // watch need know: its first content, anything sent on to the agent,
 // a failure, or a reply that isn't streamed.
 func (h *holdWriter) started() bool {
-	return h.first.first != 0 || h.passing || h.ended || h.failure != 0 || h.whole || h.status >= 400
+	return h.searchHeld || h.first.first != 0 || h.passing || h.ended || h.failure != 0 || h.whole || h.status >= 400
 }
 
 // endedIncomplete says a Responses event ends its reply cut short —
@@ -2581,6 +2649,7 @@ const (
 	eventRefusalError // the filter's error event: canceled like eventError
 	eventBuffering    // a lead saying the reply is held back for safety checks
 	eventThinking     // reasoning, before anything is said: a refusal may yet end it
+	eventSearch       // hosted web search, before reply content or a client tool
 )
 
 // refusedStatus is what a refusal with nothing said is answered as: a
@@ -2791,6 +2860,11 @@ func streamEvent(ev []byte) (kind, status int, msg string) {
 			return eventRefusalError, refusedStatus, note
 		}
 		return errOf(v.Error)
+	case (typ == "response.output_item.added" || typ == "response.output_item.done") && v.Item.Type == "web_search_call",
+		typ == "response.web_search_call.in_progress",
+		typ == "response.web_search_call.searching",
+		typ == "response.web_search_call.completed":
+		return eventSearch, 0, ""
 	// reasoning, before a word of the reply: held with it, and longer, for
 	// a refusal after it to go to another as one with nothing said (#248)
 	case typ == "content_block_start" && v.ContentBlock.thought(),

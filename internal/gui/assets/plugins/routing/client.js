@@ -433,7 +433,7 @@ function routingPage(part) {
   // (WorkBuddy's credits, #659): "355 / 500 credits · 71% used"
   const quota = (w, used, left, vars) => (w.limit > 0 ? quotaCount(w) + " · " : "") + t(quotaLeft ? left : used, { n: pct(share(w)), ...vars });
   const fill = (w) => Math.max(0, Math.min(100, share(w))) + "%";
-  const FAIL = { rate: "rate limited", credit: "out of credit", quota: "quota used up", other: "failed", auth: "sign-in required", canceled: "canceled", foreign: "another account's reasoning", floor: "reply too short", verify: "needs verification", refused: "refused (safety filter)", shape: "request not understood", proxy: "proxy not reachable", effort: "reasoning effort not in its plan", overflow: "too long for its model", slow: "slow to start", prompt: "agent's prompt turned away", restricted: "account restricted by the vendor" };
+  const FAIL = { rate: "rate limited", credit: "out of credit", quota: "quota used up", other: "failed", auth: "sign-in required", canceled: "canceled", foreign: "another account's reasoning", floor: "reply too short", verify: "needs verification", refused: "refused (safety filter)", shape: "request not understood", proxy: "proxy not reachable", effort: "reasoning effort not in its plan", overflow: "too long for its model", slow: "slow to start", held_limit: "local search hold limit", prompt: "agent's prompt turned away", restricted: "account restricted by the vendor" };
   const failWord = (why) => t(FAIL[why] || "failed");
   // a try that answered: one whose reply broke off after it began (its 200
   // sent, then the vendor's error, #733) didn't, and has a fail
@@ -964,6 +964,15 @@ function routingPage(part) {
     // as the gateway appends one only as it asks it, and with none the
     // error ended the request, the agent's once the route is done (#2281)
     const next = r.tries[i + 1], nw = next && tried(r, next);
+    if (tr.fail === "held_limit")
+      return next
+        ? t("magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. The request went to {next}; {who} doesn't rest for this.",
+          { who: name, status: tr.status, agent, next: nw ? who(nw) : t("the next") })
+        : !r.done
+        ? t("magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. The request is still in progress; {who} doesn't rest for this.",
+          { who: name, status: tr.status, agent })
+        : t("magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. {agent} gets the error; {who} doesn't rest for this.",
+          { who: name, status: tr.status, agent });
     // a Codex reset spent by itself: with Codex's own sign-in the one try
     // it was spent for is the one that then answered
     const spent = tr.reset && tr.status < 400

@@ -225,6 +225,9 @@ const (
 	// FirstToken ran out, nothing of it sent — the next is asked, and
 	// nobody rests, as a long prompt is slow anywhere
 	failSlow = "slow"
+	// failHeldLimit: magpie canceled a search-only reply at its hold
+	// limit, with nothing committed; the account doesn't rest.
+	failHeldLimit = "held_limit"
 	// failLoop: the reply was ended stuck in a loop (#1359) — the agent
 	// is told, and nobody rests, as the model, not the account, looped
 	failLoop = "loop"

@@ -2,6 +2,10 @@
 // kernel adds them to i18n.js's (magpie.strings).
 magpie.strings({
   zh: {
+    "local search hold limit": "本地搜索暂存上限",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. The request is still in progress; {who} doesn't rest for this.": "magpie 因本地搜索暂存上限（{status}）取消了 {who} 的尝试。搜索内容未交付给 {agent}。请求仍在进行中；{who} 不因此休息。",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. The request went to {next}; {who} doesn't rest for this.": "magpie 因本地搜索暂存上限（{status}）取消了 {who} 的尝试。搜索内容未交付给 {agent}。请求已转给 {next}；{who} 不因此休息。",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. {agent} gets the error; {who} doesn't rest for this.": "magpie 因本地搜索暂存上限（{status}）取消了 {who} 的尝试。搜索内容未交付给 {agent}。{agent} 收到此错误；{who} 不因此休息。",
     "The subagent effort set in magpie is {effort}; the model's supported levels and a routing group's fixed member effort still apply.": "magpie 为子代理设定的推理强度是 {effort}；仍按模型支持的等级适配，并保留路由组成员的固定强度。",
     "{agent}'s call to magpie's web_search MCP tool": "{agent} 对 magpie 的 web_search MCP 工具的调用",
     "{agent}'s {model}": "{agent} 的 {model}",
@@ -529,6 +533,10 @@ magpie.strings({
     "{h} h {m} min": "{h} 小时 {m} 分钟",
   },
   "zh-TW": {
+    "local search hold limit": "本機搜尋暫存上限",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. The request is still in progress; {who} doesn't rest for this.": "magpie 因本機搜尋暫存上限（{status}）取消了 {who} 的嘗試。搜尋內容未交付給 {agent}。請求仍在進行中；{who} 不因此休息。",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. The request went to {next}; {who} doesn't rest for this.": "magpie 因本機搜尋暫存上限（{status}）取消了 {who} 的嘗試。搜尋內容未交付給 {agent}。請求已轉給 {next}；{who} 不因此休息。",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. {agent} gets the error; {who} doesn't rest for this.": "magpie 因本機搜尋暫存上限（{status}）取消了 {who} 的嘗試。搜尋內容未交付給 {agent}。{agent} 收到此錯誤；{who} 不因此休息。",
     "The subagent effort set in magpie is {effort}; the model's supported levels and a routing group's fixed member effort still apply.": "magpie 為子代理設定的推理強度是 {effort}；仍按模型支援的等級適配，並保留路由群組成員的固定強度。",
     "{agent} guessed your next message for its composer by itself, reading the whole conversation again. Not a turn of the conversation; Settings › General › Codex composer predictions picks its model, and Codex's Settings › General › Show predictions turns it off.": "{agent} 自行為輸入框猜測你的下一則訊息，每次都把整段對話重讀一遍。不屬於對話輪次；在 設定 › 常規 › Codex 輸入框預測 裡選它用的模型，在 Codex 的 設定 › 一般 › 顯示預測內容 裡可以關掉。",
     "{agent}'s call to magpie's web_search MCP tool": "{agent} 對 magpie 的 web_search MCP 工具的呼叫",
@@ -1056,6 +1064,10 @@ magpie.strings({
     "{h} h {m} min": "{h} 小時 {m} 分鐘",
   },
   ja: {
+    "local search hold limit": "検索出力の保持上限（ローカル）",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. The request is still in progress; {who} doesn't rest for this.": "magpie は検索出力を保持するローカル上限（{status}）に達したため、{who} の試行を中止しました。検索出力は {agent} に届いていません。リクエストはまだ進行中です。{who} はこれで休止しません。",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. The request went to {next}; {who} doesn't rest for this.": "magpie は検索出力を保持するローカル上限（{status}）に達したため、{who} の試行を中止しました。検索出力は {agent} に届いていません。リクエストは {next} に引き継がれました。{who} はこれで休止しません。",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. {agent} gets the error; {who} doesn't rest for this.": "magpie は検索出力を保持するローカル上限（{status}）に達したため、{who} の試行を中止しました。検索出力は {agent} に届いていません。{agent} にこのエラーが返ります。{who} はこれで休止しません。",
     "The subagent effort set in magpie is {effort}; the model's supported levels and a routing group's fixed member effort still apply.": "magpie で設定したサブエージェントの推論レベルは {effort} です。モデルが対応するレベルへの調整と、ルーティンググループのメンバーに固定されたレベルは引き続き適用されます。",
     "{agent}'s call to magpie's web_search MCP tool": "{agent} による magpie の web_search MCP ツールの呼び出し",
     "{agent}'s {model}": "{agent} の {model}",
@@ -1583,6 +1595,10 @@ magpie.strings({
     "These routing groups will no longer be available to agents.": "これらのルーティンググループはエージェントから利用できなくなります。",
   },
   de: {
+    "local search hold limit": "lokales Limit für zurückgehaltene Suchausgabe",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. The request is still in progress; {who} doesn't rest for this.": "magpie hat den Versuch von {who} am lokalen Limit für das Zurückhalten von Suchausgaben abgebrochen ({status}). Keine Suchausgabe hat {agent} erreicht. Die Anfrage läuft noch; {who} pausiert deshalb nicht.",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. The request went to {next}; {who} doesn't rest for this.": "magpie hat den Versuch von {who} am lokalen Limit für das Zurückhalten von Suchausgaben abgebrochen ({status}). Keine Suchausgabe hat {agent} erreicht. Die Anfrage ging an {next}; {who} pausiert deshalb nicht.",
+    "magpie canceled {who}'s attempt at its local limit for holding search output ({status}). No search output reached {agent}. {agent} gets the error; {who} doesn't rest for this.": "magpie hat den Versuch von {who} am lokalen Limit für das Zurückhalten von Suchausgaben abgebrochen ({status}). Keine Suchausgabe hat {agent} erreicht. {agent} erhält den Fehler; {who} pausiert deshalb nicht.",
     "The subagent effort set in magpie is {effort}; the model's supported levels and a routing group's fixed member effort still apply.": "Der in magpie gesetzte Reasoning-Effort der Subagenten ist {effort}; die unterstützten Stufen des Modells und die feste Stufe eines Mitglieds der Routing-Gruppe gelten weiterhin.",
     "{agent}'s call to magpie's web_search MCP tool": "den Aufruf von {agent} an magpies MCP-Werkzeug web_search",
     "{agent}'s {model}": "{model} von {agent}",
